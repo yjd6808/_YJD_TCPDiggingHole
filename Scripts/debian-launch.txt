@@ -1,0 +1,4 @@
+rm -rf publish
+cd ~ && unzip -o ./publish.zip -d ~
+cd publish && sudo chmod +x ./Introducer
+./Introducer
