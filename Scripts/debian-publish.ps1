@@ -1,5 +1,5 @@
 # 타겟 운영체제를 데비안으로 하고 릴리즈 빌드
-cd Introducer 
+cd ../Introducer 
 dotnet publish -c release -r debian-arm64 --self-contained
 
 # 빌드된 파일들이 있는 경로로 이동

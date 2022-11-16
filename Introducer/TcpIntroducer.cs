@@ -9,11 +9,9 @@
  * * * * * * * * * * * * * 
  */
 
-using System;
-using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
 
 using MoreLinq;
 
@@ -26,12 +24,15 @@ public class TcpIntroducer
     private readonly TcpListener _tcpListener;
     private readonly Dictionary<long, TcpSession> _sessions;
     private readonly SessionPktParser _pktParser;
+    
     private readonly Thread _acceptThread;
     private readonly Thread _clearThread;
 
+    public IPEndPoint? LocalEndPoint => _tcpListener.LocalEndpoint as IPEndPoint;
+
     public TcpIntroducer(int port)
     {
-        _tcpListener = new TcpListener(IPEndPoint.Parse("0.0.0.0:9999"));
+        _tcpListener = new TcpListener(IPEndPoint.Parse($"0.0.0.0:{port}"));
         _sessions = new Dictionary<long, TcpSession>();
         _acceptThread = new Thread(AcceptThreadMain) { IsBackground = true };
         _clearThread = new Thread(ClearThreadMain) { IsBackground = true };
@@ -66,19 +67,21 @@ public class TcpIntroducer
             while (true)
             {
                 var session = new TcpSession(_tcpListener.AcceptTcpClient(), _pktParser);
-                session.ClientSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
                 session.OnDisconnected += Session_OnDisconnected;
                 session.OnReceived += Session_OnReceived;
                 session.OnSent += Session_OnSent;
                 session.ReceiveAsync();
             }
         }
-        catch { }
+        catch (Exception e)
+        {
+            ConsoleEx.PrintExecption(e);
+        }
     }
 
     private void ClearThreadMain()
     {
-        List<TcpSession> disconnected = new List<TcpSession>();
+        List<TcpSession> disconnected = new ();
 
         while (true)
         {
@@ -99,7 +102,7 @@ public class TcpIntroducer
                 disconnected.ForEach(x =>
                 {
                     _sessions.Remove(x.Id);
-                    Console.WriteLine($"클라이언트 타입아웃 종료 {x.Id} [남은 인원: {_sessions.Count}]");
+                    ConsoleEx.LogLine($"클라이언트 타움아웃 종료 {x.Id} [남은 인원: {_sessions.Count}]", ConsoleColor.Red);
                 });
 
                 if (disconnected.Count > 0)
@@ -112,16 +115,20 @@ public class TcpIntroducer
         }
     }
 
-    private void Session_OnSent(TcpClientEx client, PktBase pkt)
+    private void Session_OnSent(TcpClientEx client, PktBase pkt, int sentBytes)
     {
-        TcpSession session = client as TcpSession;
-        ConsoleEx.PacketLog($"\t[{session.Id} 보냄][{pkt}]", ConsoleColor.Green);
+        TcpSession? session = client as TcpSession;
+        Debug.Assert(session != null);
+
+        ConsoleEx.LogLine($"클라이언트 {session.Id}({client.RemoteEndPoint})로 {pkt}[{sentBytes}바이트] 전송완료", ConsoleColor.Yellow);
     }
 
-    private void Session_OnReceived(TcpClientEx client, PktBase pkt)
+    private void Session_OnReceived(TcpClientEx client, PktBase pkt, int receivedBytes)
     {
-        TcpSession session = client as TcpSession;
-        ConsoleEx.PacketLog($"[{session.Id} 받음][{pkt}]", ConsoleColor.DarkYellow);
+        TcpSession? session = client as TcpSession;
+        Debug.Assert(session != null);
+
+        ConsoleEx.LogLine($"클라이언트 {session.Id}({client.RemoteEndPoint})로부터 {pkt}[{receivedBytes}바이트] 수신완료", ConsoleColor.Green);
     }
 
     // 연결 성공 기준을 상대의 Private 주소를 획득한 시점으로 하자.
@@ -134,12 +141,12 @@ public class TcpIntroducer
             {
                 _sessions[session.Id].Disconnect();
                 _sessions[session.Id] = session;
-                ConsoleEx.WriteLine($"클라이언트 재접속 {session.Id}", ConsoleColor.DarkYellow);
+                ConsoleEx.WriteLine($"클라이언트 {session.Id}({session.RemoteEndPoint})가 재접속하였습니다.", ConsoleColor.Green);
             }
             else
             {
                 _sessions.Add(session.Id, session);
-                ConsoleEx.WriteLine($"클라이언트 접속 {session.Id}", ConsoleColor.Green);
+                ConsoleEx.WriteLine($"클라이언트 {session.Id}({session.RemoteEndPoint})가 신규 접속하였습니다.", ConsoleColor.Green);
             }
         }
 
@@ -157,22 +164,17 @@ public class TcpIntroducer
 
     private void Session_OnDisconnected(TcpClientEx client, bool safe)
     {
-        TcpSession session = client as TcpSession;
+        TcpSession? session = client as TcpSession;
+        Debug.Assert(session != null);
 
         // 홀펀칭 진행중이고 안전하게 종료된 경우에는 세션목록에서 제거하지 않는다.
         if (safe && session.IsHolePunching)
             return;
 
-        long id = -1;
-        int leftSessionCount = 0;
-
         lock (this)
         {
             if (_sessions.ContainsKey(session.Id))
                 _sessions.Remove(session.Id);
-
-            id = session.Id;
-            leftSessionCount = _sessions.Count;
         }
 
         if (safe)
@@ -210,7 +212,10 @@ public class TcpIntroducer
 
     public void PrintSessions()
     {
-        Console.WriteLine("[접속중인 유저 목록]");
+        ConsoleEx.WriteLine("[접속중인 유저 목록]");
+        ConsoleEx.WriteLine(" ├ [●]: 연결됨");
+        ConsoleEx.WriteLine(" ├ [  ]: 연결 안됨");
+        ConsoleEx.WriteLine(" │");
         using var _ = DisposeLock.AutoLock(this);
         var sessions = _sessions.Values.ToList();
         for (var i = 0; i < sessions.Count; i++)
@@ -223,7 +228,7 @@ public class TcpIntroducer
             info += sessionConnected ? "[●]" : "[  ]";
 
             if (session.IsHolePunching)
-                info += $"[홀펀칭 진행중]";
+                info += "[홀펀칭 진행중]";
 
             if (sessionConnected)
                 ConsoleEx.WriteLine(info, ConsoleColor.Green);
@@ -258,7 +263,7 @@ public class TcpIntroducer
         using var _ = DisposeLock.AutoLock(this);
         if (!_sessions.ContainsKey(id))
         {
-            Console.WriteLine("대상을 찾지 못했습니다.");
+            Console.WriteLine("대상을 찾지 못했습니다.", ConsoleColor.Red);
             return;
         }
 

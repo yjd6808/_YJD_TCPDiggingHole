@@ -23,7 +23,7 @@ public abstract class PktParser<T> : IPktParser where T : TcpClientEx
         _ptkHandlers = new Dictionary<int, Action<PktBase, T>>();
     }
 
-    public abstract void Initialize();
+    public abstract PktParser<T> Initialize();
 
     public bool TryParse(TcpClientEx client, PktBase pkt)
     {

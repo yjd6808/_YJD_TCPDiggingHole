@@ -1,24 +1,31 @@
-﻿using System.Net;
-using System.Net.Sockets;
-using Introducer;
+﻿using Introducer;
 using Shared;
 
-TcpIntroducer introducer = new TcpIntroducer(9999);
-introducer.Start();
+Console.Write("바인드할 포트를 입력해주세요. ");
+int.TryParse(Console.ReadLine(), out int port);
 
-Console.WriteLine("서버가 시작되었습니다.");
+if (port < 100 || port > short.MaxValue)
+{
+    Console.WriteLine($"포트는 100 ~ {short.MaxValue}사이로 입력해주세요.");
+    return;
+}
+
+TcpIntroducer introducer = new TcpIntroducer(port);
+introducer.Start();
 
 while (true)
 {
     ConsoleEx.WriteLine("===========================================");
-    ConsoleEx.WriteLine("[커맨드 키]");
-    ConsoleEx.WriteLine("├ A: 종료");
-    ConsoleEx.WriteLine("├ S: 피어 목록 출력");
-    ConsoleEx.WriteLine("├ D: 브로드캐스트 랜덤메시지 전송");
-    ConsoleEx.WriteLine("└ F: 특정 세션에게 랜덤메시지 전송");
+    ConsoleEx.WriteLine("[실행 가능한 커맨드 목록]", ConsoleColor.Cyan);
+    ConsoleEx.WriteLine($"├─── 리스닝 포트: {introducer.LocalEndPoint?.Port}", ConsoleColor.White);
+    ConsoleEx.WriteLine($"├─── 접속중인 클라이언트 수: {introducer.GetSessionList().Count}", ConsoleColor.White);
+    ConsoleEx.WriteLine("│ ", ConsoleColor.White);
+    ConsoleEx.WriteLine("├ A: 종료", ConsoleColor.White);
+    ConsoleEx.WriteLine("├ S: 클라이언트 목록 출력", ConsoleColor.White);
+    ConsoleEx.WriteLine("├ D: 브로드캐스트 랜덤메시지 전송", ConsoleColor.White);
+    ConsoleEx.WriteLine("└ F: 특정 클라이언트에게 랜덤메시지 전송", ConsoleColor.White);
 
     var key = Console.ReadKey();
-    ConsoleEx.WriteLine("\n===========================================");
 
     switch (key.Key)
     {

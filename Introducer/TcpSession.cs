@@ -8,13 +8,9 @@
  * * * * * * * * * * * * * 
  */
 
-using System;
-using System.Collections.Generic;
 using System.Net;
-using System.Net.Http;
 using System.Net.Sockets;
-using System.Security.Cryptography;
-using System.Text;
+
 using Shared;
 
 namespace Introducer;
@@ -26,17 +22,7 @@ public class TcpSession : TcpClientEx
 
     public long Id { get; private set; }
 
-    public Socket? ClientSocket
-    {
-        get
-        {
-            if (!IsConnected())
-                return null;
-
-            return _tcpClientSocket;
-        }
-    }
-        
+   
     public IPEndPoint? PublicEndPoint
     {
         get
@@ -78,24 +64,22 @@ public class TcpSession : TcpClientEx
 
     public TcpSession(TcpClient client, IPktParser parser) : base(client.Client, parser)
     {
+        Id = Interlocked.Increment(ref s_seqId);
         _privateEndPoint = string.Empty;
         _isHolePunching = ConstLong.False;
 
         ConnectedSessions = new List<long>();
     }
 
-    public void UpdatePrivateEndPoint(string privateEndPoint, long defaultId, List<long> connectedPeers)
+    public void UpdatePrivateEndPoint(string privateEndPoint)
     {
         using var _ = DisposeLock.AutoLock(this);
-
-        // 처음 접속하는 경우
-        if (defaultId == -1)
-            Id = Interlocked.Increment(ref s_seqId);
-        else
-            Id = defaultId;
-
         _privateEndPoint = privateEndPoint;
+    }
 
+    public void UpdateConnectedPeers(List<long> connectedPeers)
+    {
+        using var _ = DisposeLock.AutoLock(this);
         ConnectedSessions.Clear();
         ConnectedSessions.AddRange(connectedPeers);
     }

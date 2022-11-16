@@ -1,0 +1,72 @@
+hide empty methods
+hide empty fields
+allowmixing
+
+class TcpIntroducer
+class TcpSession
+class SessionPktParser {
+    TcpSession에서 수신하는 패킷 파싱
+}
+
+class TcpParticipant
+class TcpPeer
+
+interface IHolepuncher
+class ListeningHolepuncher
+class ConnectingHolepuncher
+
+class PeerPktParser {
+    TcpPeer에서 수신하는 패킷 파싱
+}
+
+class ParticipantPktParser {
+    TcpParticipant에서 수신하는 패킷 파킹
+}
+
+class TcpClientEx {
+    클라이언트 
+    ---
+    Socket _socket
+    byte[] _recvBuffer
+    ---
+    event OnReceived
+    event OnSent
+    event OnConnected
+    event OnDisconnected
+    ---
+    void SendAsync()
+    void ReceiveAsync()
+    void ConnectAsync()
+    void TryConnectAsync()
+    void Disconnect()
+}
+
+interface IPktParser {
+    PktParser<T>가 제너릭 타입이라서
+    타이핑이 힘들어서 인터페이스로 다루도록 하기위함
+    ---
+    void TryParse()
+}
+
+abstract class PktParser<T>
+
+PktParser .u.|> IPktParser
+PeerPktParser -u-|> PktParser
+ParticipantPktParser -u-|> PktParser
+SessionPktParser -u-|> PktParser
+
+PeerPktParser .d.> _TcpPeer
+ParticipantPktParser .d.> _TcpParticipant
+SessionPktParser .d.> _TcpSession
+
+
+TcpIntroducer *-d-> TcpSession
+    
+TcpParticipant *-d-> TcpPeer
+TcpPeer *--> IHolepuncher
+ListeningHolepuncher .u.|> IHolepuncher
+ConnectingHolepuncher .u.|> IHolepuncher
+ConnectingHolepuncher -u-|> TcpClientEx
+TcpParticipant -u-|> TcpClientEx
+TcpSession -u-|> TcpClientEx
+

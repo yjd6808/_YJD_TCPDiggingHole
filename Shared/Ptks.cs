@@ -21,11 +21,12 @@ public static class Pkt
         public const int P2PConnectRequest         = 10006;         // 클라 -> 서버 / 클라 A가 서버에게 B와 연결하고 싶다고 요청
         public const int P2PConnectRequestAck      = 10007;         // 서버 -> 클라 / 서버는 B에게 A와 연결하라고 명령
         public const int P2PConnectSuccess         = 10008;         // 클라 -> 서버 / 홀펀칭 성공 후 서버에 재접속하면서 보내주는 메시지
+        public const int P2PDisconnected           = 10009;         // 클라 -> 서버 / P2P 연결이 끊어진 경우 서버에 알려줌
         public const int ServerMessage             = 10015;         // 서버 -> 클라 / 서버가 클라한테 보내는 메시지
 
 
         // P2P로 주고받는 패킷들
-        public const int P2PMessage                = 10105;
+        public const int P2PEchoMessage                = 10105;
     }
 
     public static readonly Dictionary<int, string> NameMap = new ()
@@ -40,7 +41,7 @@ public static class Pkt
         { Type.P2PConnectRequestAck    , "P2PConnectRequestAck"  },
         { Type.P2PConnectSuccess       , "P2PConnectSuccess"     },
         { Type.ServerMessage           , "ServerMessage"         },
-        { Type.P2PMessage              , "P2PMessage"            }
+        { Type.P2PEchoMessage              , "P2PMessage"            }
     };
 
     public static PktBase ToPktBase(byte[] bytes, int offset, int size)
@@ -80,8 +81,9 @@ public static class Pkt
 [ProtoInclude(Pkt.Type.P2PConnectRequest, typeof(PktP2PConnectRequest))]
 [ProtoInclude(Pkt.Type.P2PConnectRequestAck, typeof(PktP2PConnectRequestAck))]
 [ProtoInclude(Pkt.Type.P2PConnectSuccess, typeof(PktP2PConnectSuccess))]
+[ProtoInclude(Pkt.Type.P2PDisconnected, typeof(PktP2PDisconnected))]
 [ProtoInclude(Pkt.Type.ServerMessage, typeof(PktServerMessage))]
-[ProtoInclude(Pkt.Type.P2PMessage, typeof(PktP2PMessage))]
+[ProtoInclude(Pkt.Type.P2PEchoMessage, typeof(PktP2PEchoMessage))]
 public class PktBase
 {
     public int Type { get; }
@@ -107,8 +109,7 @@ public class PktBase
 public class PktConnectionMessage : PktBase
 {
     public string PrivateEndPoint { get; }
-    public long DefaultId { get; }
-    public List<long> ConnectedPeers { get; } = new List<long>();
+    
 
     public PktConnectionMessage() : base(Pkt.Type.ConnectionMessage)
     {
@@ -118,14 +119,8 @@ public class PktConnectionMessage : PktBase
     public PktConnectionMessage(string privateEndPoint) : base(Pkt.Type.ConnectionMessage)
     {
         PrivateEndPoint = privateEndPoint;
-        DefaultId = -1;
     }
-    public PktConnectionMessage(string privateEndPoint, long defaultId, List<long> connectedPeers) : base(Pkt.Type.ConnectionMessage)
-    {
-        PrivateEndPoint = privateEndPoint;
-        DefaultId = defaultId;
-        ConnectedPeers = connectedPeers;
-    }
+    
 }
 #endregion
     
@@ -145,8 +140,8 @@ public class PktEchoMessage : PktBase
 public class PktSessionInfo
 {
     public long Id { get; set; }
-    public string PrivateEndPoint { get; set; }
-    public string PublicEndPoint { get; set; }
+    public string? PrivateEndPoint { get; set; }
+    public string? PublicEndPoint { get; set; }
 }
 #endregion
 
@@ -232,18 +227,30 @@ public class PktP2PConnectRequestAck : PktBase
 public class PktP2PConnectSuccess : PktBase
 {
     public long TargetId { get; set; }
+    public List<long> ConnectedPeers { get; set; } = new ();
     public PktP2PConnectSuccess() : base(Pkt.Type.P2PConnectSuccess) { }
 }
 #endregion
 
+#region PktP2PDisconnected
+[ProtoContract(ImplicitFields = ImplicitFields.AllPublic)]
+public class PktP2PDisconnected : PktBase
+{
+    public List<long> ConnectedPeers { get; set; } = new();
+    public PktP2PDisconnected() : base(Pkt.Type.P2PDisconnected) { }
+}
+#endregion
+
+
 #region PktP2PMessage
 
 [ProtoContract(ImplicitFields = ImplicitFields.AllPublic)]
-public class PktP2PMessage : PktBase
+public class PktP2PEchoMessage : PktBase
 {
     public long Sender { get; set; }
     public string Message { get; set; }
-    public PktP2PMessage() : base(Pkt.Type.P2PMessage) { }
+    public bool Echo { get; set; }
+    public PktP2PEchoMessage() : base(Pkt.Type.P2PEchoMessage) { }
 }
 
 #endregion

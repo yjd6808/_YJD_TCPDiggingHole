@@ -17,25 +17,25 @@ namespace Shared;
 using System;
 using System.Net.Sockets;
 using System.Net;
-using System.Threading;
-
 
 public delegate void OnDisconnectedHandler(TcpClientEx client, bool safeClosed);
 public delegate void OnConnectedSuccessHandler(TcpClientEx client);
 public delegate void OnConnectedFailedHandler(TcpClientEx client);
 
-public delegate void OnSentHandler(TcpClientEx client, PktBase pkt);
-public delegate void OnReceivedHandler(TcpClientEx client, PktBase pkt);
+public delegate void OnSentHandler(TcpClientEx client, PktBase pkt, int sentBytes);
+public delegate void OnReceivedHandler(TcpClientEx client, PktBase pkt, int receivedBytes);
 
 public class TcpClientEx
 {
-    protected Socket _tcpClientSocket;
-    protected readonly IPktParser _pktParser;
-    private readonly byte[] _buffer;
-    private int _unProcessedByteCount;
-    private const int BufferSize = 8192;
-    
-    public IPEndPoint? LocalEndPoint => _tcpClientSocket.LocalEndPoint as IPEndPoint;
+    protected Socket _tcpClientSocket;              // 클라이언트 소켓
+    protected readonly IPktParser _pktParser;       // 패킷 들어오면 맞는 콜백함수 실행해줌
+
+    private readonly byte[] _recvBuffer;            // 수신버퍼
+    private const int BufferSize = 8192;            // 수신버퍼 크기
+
+    private int _unProcessedByteCount;              // 아직 처리안된 바이트 수
+
+    public IPEndPoint? LocalEndPoint => _tcpClientSocket.LocalEndPoint as IPEndPoint; 
 
     public IPEndPoint? RemoteEndPoint
     {
@@ -48,10 +48,18 @@ public class TcpClientEx
         }
     }
 
+    // 로컬 포트 중복 바인딩을 할 수 있도록 하기 위함
     public bool ReuseAddress
     {
-        get => (int)_tcpClientSocket.GetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress)! != 0;
-        set => _tcpClientSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, value);
+        get => _tcpClientSocket.GetReuseAddress();
+        set => _tcpClientSocket.SetReuseAddress(value);
+    }
+
+    // 구멍 유지를 위함
+    public bool KeepAlive
+    {
+        get => _tcpClientSocket.GetkeepAlive();
+        set => _tcpClientSocket.SetkeepAlive(value);
     }
         
 
@@ -62,20 +70,15 @@ public class TcpClientEx
     public event OnReceivedHandler? OnReceived;
     
 
-    private long _sendPendingCount;
-    private long _receivePendingCount;
-    private long _connectPendingCount;
-
-
     // 클라에서 TcpParticipant 생성할 때 호출
-#pragma warning disable CS8618
     public TcpClientEx(IPktParser pktParser)
-#pragma warning restore CS8618
     {
         _pktParser = pktParser;
-        _buffer = new byte[BufferSize];
-        
-        BindNew();
+        _recvBuffer = new byte[BufferSize];
+        _tcpClientSocket = SocketEx.CreateTcpSocket();
+
+        KeepAlive = true;
+        ReuseAddress = true;
     }
 
     // 서버가 TcpSession 생성할 때 호출
@@ -83,56 +86,31 @@ public class TcpClientEx
     public TcpClientEx(Socket clientSocket, IPktParser pktParser)
     {
         _pktParser = pktParser;
-        _buffer = new byte[BufferSize];
+        _recvBuffer = new byte[BufferSize];
         _tcpClientSocket = clientSocket;
 
+        KeepAlive = true;
         ReuseAddress = true;
     }
 
     // 클라가 TcpPeer에서 ConnectionHolepuncher 생성할 때 호출
-    public TcpClientEx(IPEndPoint localEndPoint, IPktParser pktParser)
+    public TcpClientEx(int localPort, IPktParser pktParser)
     {
         _pktParser = pktParser;
-        _buffer = new byte[BufferSize];
-        _tcpClientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        _recvBuffer = new byte[BufferSize];
+        _tcpClientSocket = SocketEx.CreateTcpSocket();
 
+        KeepAlive = true;
         ReuseAddress = true;
-        Console.WriteLine(localEndPoint);
-        _tcpClientSocket.Bind(localEndPoint);
+
+        _tcpClientSocket.Bind(new IPEndPoint(IPAddress.Any, localPort));
     }
 
-    private void Initialize()
-    {
-        _sendPendingCount = 0;
-        _receivePendingCount = 0;
-        _unProcessedByteCount = 0;
-    }
-
-
-    // https://stackoverflow.com/questions/223063/how-can-i-create-an-httplistener-class-on-a-random-port-in-c
-    // 랜덤 포트 얻는 방법
-    public static int GetRandomUnusedPort()
-    {
-        var listener = new TcpListener(IPAddress.Any, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
-    }
-
-    public void BindNew()
-    {
-        _tcpClientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        _tcpClientSocket.Bind(new IPEndPoint(IPAddress.Any, GetRandomUnusedPort()));
-
-        ReuseAddress = true;
-    }
     
     public bool TryConnectSynchronously(IPEndPoint endPoint, int timeout = -1)
     {
         try
         {
-            Initialize();
             _tcpClientSocket.BeginConnect(endPoint, (s) => _tcpClientSocket?.EndConnect(s), this).AsyncWaitHandle.WaitOne(timeout);
             OnConnectedSuccess?.Invoke(this);
             ReceiveAsync();
@@ -140,24 +118,21 @@ public class TcpClientEx
         }
         catch (Exception e)
         {
-            Logger.PrintExecption(e);
+            ConsoleEx.PrintExecption(e);
             return false;
         }
     }
-
 
 
     public void ConnectAsync(IPEndPoint endPoint)
     {
         try
         {
-            Initialize();
-            Interlocked.Increment(ref _connectPendingCount);
             _tcpClientSocket.BeginConnect(endPoint, ConnectAsyncCallback, null);
         }
         catch (Exception e)
         {
-            Logger.PrintExecption(e);
+            ConsoleEx.PrintExecption(e);
         }
     }
 
@@ -171,47 +146,24 @@ public class TcpClientEx
             // Disconnect(true|false): Shutdown(Both) 포함, 보낼 패킷이 있으면 모두 보냄(상대방 마지막에 0바이트 수신), false 시에는 시스템 리소스 반환
             // Close(타임아웃): 데이터를 보내는 중간에 중단될 수 있음, 타임아웃 지정가능
             // Dispose: 타임아웃을 전달하지 않는 Close와 같음 - 시스템 리소스반환
-            _tcpClientSocket.Disconnect(false);
-           
+            _tcpClientSocket.Shutdown(SocketShutdown.Both);
+            _tcpClientSocket.Disconnect(true);
         }
         catch (Exception e)
         {
-            Logger.PrintExecption(e);
-        }
-        finally
-        {
-            // 모든 비동기 송/수신 결과가 완료될때까지 기다린다.
-            //while (Interlocked.Read(ref _connectPendingCount) > 0)
-            //{
-            //    Console.WriteLine($"수신 펜딩카운트 {_connectPendingCount} {GetType()}");
-            //    Thread.Sleep(1000);
-            //}
-
-            //while (Interlocked.Read(ref _sendPendingCount) > 0)
-            //{
-            //    Console.WriteLine($"송신 펜딩카운트 {_sendPendingCount} {GetType()}");
-            //    Thread.Sleep(1000);
-            //}
-
-            //while (Interlocked.Read(ref _receivePendingCount) > 0)
-            //{
-            //    Console.WriteLine($"수신 펜딩카운트 {_receivePendingCount} {GetType()}");
-            //    Thread.Sleep(1000);
-            //}
+            ConsoleEx.PrintExecption(e);
         }
     }
 
     public void SendAsync(PktBase pkt)
     {
-        Interlocked.Increment(ref _sendPendingCount);
         byte[] sendData = Pkt.ToByteArray(pkt);
         _tcpClientSocket.BeginSend(sendData, 0, sendData.Length, SocketFlags.None, SendAsyncCallback, pkt);
     }
 
     public void ReceiveAsync(int offset = 0, int size = BufferSize)
     {
-        Interlocked.Increment(ref _receivePendingCount);
-        _tcpClientSocket.BeginReceive(_buffer, offset, size, SocketFlags.None, ReceiveAsyncCallback, null);
+        _tcpClientSocket.BeginReceive(_recvBuffer, offset, size, SocketFlags.None, ReceiveAsyncCallback, null);
     }
 
     public virtual bool IsConnected() => _tcpClientSocket.Connected;
@@ -222,40 +174,34 @@ public class TcpClientEx
         {
             _tcpClientSocket.EndConnect(result);
             OnConnectedSuccess?.Invoke(this);
+            ReceiveAsync();
         }
         catch (Exception e)
         {
-            Logger.PrintExecption(e, GetType().ToString());
+            ConsoleEx.PrintExecption(e, GetType().ToString());
             OnConnectedFailed?.Invoke(this);
-        }
-        finally
-        {
-            Interlocked.Decrement(ref _connectPendingCount);
         }
     }
 
 
     private void SendAsyncCallback(IAsyncResult result)
     {
-        Interlocked.Decrement(ref _sendPendingCount);
-
         try
         {
-            var sendBytes = _tcpClientSocket.EndReceive(result);
+            var sentBytes = _tcpClientSocket.EndReceive(result);
             var pkt = result.AsyncState as PktBase;
             Debug.Assert(pkt != null);
 
-            OnSent?.Invoke(this, pkt);
+            OnSent?.Invoke(this, pkt, sentBytes);
 
-            if (sendBytes != 0)
+            if (sentBytes != 0)
                 return;
 
             OnDisconnected?.Invoke(this, true);
         }
         catch (Exception e)
         {
-            Logger.PrintExecption(e, "", false);
-            Disconnect();
+            ConsoleEx.PrintExecption(e, "", false);
             OnDisconnected?.Invoke(this, false);
         }
     }
@@ -263,8 +209,6 @@ public class TcpClientEx
 
     private void ReceiveAsyncCallback(IAsyncResult result)
     {
-
-
         try
         {
             var readOffset = 0;
@@ -277,7 +221,6 @@ public class TcpClientEx
 
             _unProcessedByteCount += recvBytes;
 
-
             // 여기서 _buffer의 상태
             // [■■■■[■■■■][■■■■■■■][■■■■■■■■][■■■
             // <-- _unProcessedByteCount -->
@@ -287,13 +230,13 @@ public class TcpClientEx
             while (_unProcessedByteCount >= Pkt.HeaderLength)
             {
                 // 헤더(패킷의 크기)를 포함한 패킷 크기
-                var packetLen = BitConverter.ToInt32(_buffer, readOffset) + Pkt.HeaderLength;
+                var packetLen = BitConverter.ToInt32(_recvBuffer, readOffset) + Pkt.HeaderLength;
 
                 if (_unProcessedByteCount >= packetLen)
                 {
                     // 헤더를 제외해서 패킷으로 변환
-                    var pkt = Pkt.ToPktBase(_buffer, readOffset + Pkt.HeaderLength, packetLen - Pkt.HeaderLength);
-                    OnReceived?.Invoke(this, pkt);
+                    var pkt = Pkt.ToPktBase(_recvBuffer, readOffset + Pkt.HeaderLength, packetLen - Pkt.HeaderLength);
+                    OnReceived?.Invoke(this, pkt, recvBytes);
                     _pktParser.TryParse(this, pkt);
 
                     _unProcessedByteCount -= packetLen;
@@ -312,7 +255,7 @@ public class TcpClientEx
             //                               <---> 
             //                               _unProcessedByteCount
             // 앞으로 당겨줘야한다.
-            Array.Copy(_buffer, srcOffset, _buffer, dstOffset, _unProcessedByteCount);
+            Array.Copy(_recvBuffer, srcOffset, _recvBuffer, dstOffset, _unProcessedByteCount);
 
 
             // 여기서 _buffer의 상태
@@ -331,15 +274,12 @@ public class TcpClientEx
             if (e.GetType() == typeof(SocketException))
             {
                 SocketException? se = e as SocketException;
-                socketErrorCode = se.ErrorCode;
+                if (se != null) socketErrorCode = se.ErrorCode;
             }
 
-            Logger.PrintExecption(e, $"소켓 오류: {socketErrorCode} 타입: {GetType()}");
+            ConsoleEx.PrintExecption(e, $"소켓 오류: {socketErrorCode} 타입: {GetType()}");
+            Disconnect();
             OnDisconnected?.Invoke(this, false);
-        }
-        finally
-        {
-            Interlocked.Decrement(ref _receivePendingCount);
         }
     }
 }

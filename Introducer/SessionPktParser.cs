@@ -8,10 +8,8 @@
  * * * * * * * * * * * * * 
  */
 
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Text;
+
 using Shared;
 
 namespace Introducer;
@@ -25,11 +23,25 @@ public class SessionPktParser : PktParser<TcpSession>
         _introducer = introducer;
     }
 
-    public override void Initialize()
+    public override PktParser<TcpSession> Initialize()
     {
         _ptkHandlers.Add(Pkt.Type.ConnectionMessage, ConnectionMessage);
         _ptkHandlers.Add(Pkt.Type.P2PConnectRequest, P2PConnectRequest);
+        _ptkHandlers.Add(Pkt.Type.P2PConnectSuccess, P2PConnectSuccess);
         _ptkHandlers.Add(Pkt.Type.EchoMessage, EchoMessage);
+        return this;
+    }
+
+    private void ConnectionMessage(PktBase ptkBase, TcpSession receiver)
+    {
+        var pkt = ptkBase as PktConnectionMessage;
+        Debug.Assert(pkt != null);
+
+        // 유저 정보 갱신
+        receiver.UpdatePrivateEndPoint(pkt.PrivateEndPoint);
+        receiver.SendAsync(new PktRefreshInfoAck(receiver.GetSessionInfo()));
+
+        _introducer.Session_OnConnected(receiver);
     }
 
     private void EchoMessage(PktBase pktBase, TcpSession receiver)
@@ -37,7 +49,7 @@ public class SessionPktParser : PktParser<TcpSession>
         var pkt = pktBase as PktEchoMessage;
         Debug.Assert(pkt != null);
 
-        ConsoleEx.WriteLine($"{receiver.Id}로부터 에코 메시지 수신: {pkt.Message}", ConsoleColor.DarkMagenta);
+        ConsoleEx.WriteLine($"클라이언트 {receiver.Id}({receiver.RemoteEndPoint})로부터 에코 메시지 수신: {pkt.Message}", ConsoleColor.Magenta);
         receiver.SendAsync(new PktEchoMessage { Message = pkt.Message });
     }
 
@@ -64,15 +76,14 @@ public class SessionPktParser : PktParser<TcpSession>
         target.IsHolePunching = true;
     }
 
-    private void ConnectionMessage(PktBase ptkBase, TcpSession receiver)
+    private void P2PConnectSuccess(PktBase ptkBase, TcpSession receiver)
     {
-        var pkt = ptkBase as PktConnectionMessage;
+        var pkt = ptkBase as PktP2PConnectSuccess;
         Debug.Assert(pkt != null);
 
-        // 유저 정보 갱신
-        receiver.UpdatePrivateEndPoint(pkt.PrivateEndPoint, pkt.DefaultId, pkt.ConnectedPeers);
-        receiver.SendAsync(new PktRefreshInfoAck(receiver.GetSessionInfo()));
-
-        _introducer.Session_OnConnected(receiver);
+        receiver.UpdateConnectedPeers(pkt.ConnectedPeers);
+        receiver.IsHolePunching = false;
     }
+
+
 }

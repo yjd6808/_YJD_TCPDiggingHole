@@ -15,6 +15,8 @@ namespace Participant;
 
 public delegate void OnHolepunchSuccessHandler(TcpPeer target);
 
+public delegate void OnPeerDisconnectedHandler(TcpPeer target, bool safeClosed);
+
 public class TcpPeer 
 {
     private const int ListenSock = 0;
@@ -36,7 +38,9 @@ public class TcpPeer
     private bool _processingHolePunching;
 
     public event OnHolepunchSuccessHandler? OnHolepunchSuccess;
-    
+    public event OnPeerDisconnectedHandler? OnPeerDisconnected;
+
+
     public TcpPeer(TcpParticipant participant, PktSessionInfo sessionInfo, IPktParser parser)
     {
         _sockets = new List<IHolepuncher>(MaxSock);
@@ -70,6 +74,8 @@ public class TcpPeer
         // 연결된 Private, Public, Listening 소켓 중에 연결된게 있으면 끊어줌
         Disconnect();
 
+        ConsoleEx.DebugLogLine($"클라이언트 {sessionInfo.Id}의 정보 업데이트 진행");
+
         Id = sessionInfo.Id;
         PublicEndPoint = IPEndPoint.Parse(sessionInfo.PublicEndPoint);
         PrivateEndPoint = IPEndPoint.Parse(sessionInfo.PrivateEndPoint);
@@ -78,9 +84,9 @@ public class TcpPeer
         Debug.Assert(localEndPoint != null);
 
         // Public, Private 정보가 업데이트 되었으므로 세로운 홀펀쳐들을 생성해줘야한다.
-        var listeningPuncher = new ListeningHolepuncher(this, localEndPoint, _parser);
-        var publicPuncher = new ConnectingHolepuncher(this, localEndPoint, PublicEndPoint, _parser, ConnectingHolepuncher.Type.PublicConnection);
-        var privatePuncher = new ConnectingHolepuncher(this, localEndPoint, PrivateEndPoint, _parser, ConnectingHolepuncher.Type.PrivateConnection);
+        var listeningPuncher = new ListeningHolepuncher(this, localEndPoint.Port, _parser);
+        var publicPuncher = new ConnectingHolepuncher(this, localEndPoint.Port, PublicEndPoint, _parser, ConnectingHolepuncher.Type.PublicConnection);
+        var privatePuncher = new ConnectingHolepuncher(this, localEndPoint.Port, PrivateEndPoint, _parser, ConnectingHolepuncher.Type.PrivateConnection);
 
         if (_sockets.Count == 0)
         {
@@ -122,7 +128,7 @@ public class TcpPeer
 
         _processingHolePunching = false;
 
-        if (_connectionType == -1)
+        if (!IsConnected())
             return;
 
         // 연결중인 대상이 있으면 연결중지해준다.
@@ -200,18 +206,20 @@ public class TcpPeer
 
         private TcpClientEx? _acceptedClient;
         
-        public ListeningHolepuncher(TcpPeer peer, IPEndPoint localEndPoint, IPktParser pktParser)
+        public ListeningHolepuncher(TcpPeer peer, int localPort, IPktParser pktParser)
         {
             _peer = peer;
             _pktParser = pktParser;
 
-            _listeningSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            _listeningSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-            _listeningSocket.Bind(localEndPoint);
+            _listeningSocket = SocketEx.CreateTcpSocket();
+            _listeningSocket.SetReuseAddress(true);            
+            _listeningSocket.BindV4(localPort);
         }
 
         public void StartHandshake()
         {
+            ConsoleEx.DebugLogLine($"[홀펀처: {ToString()}] {_listeningSocket.LocalEndPoint} 리스닝 시작");
+
             _listeningSocket.Listen();
             _listeningSocket.BeginAccept(AcceptAsyncResult, null);
         }
@@ -221,6 +229,8 @@ public class TcpPeer
             if (IsConnected())
                 return;
 
+            ConsoleEx.DebugLogLine($"[홀펀처: {ToString()}] {_listeningSocket.LocalEndPoint} 리스닝 중단");
+
             try
             {
                 // 리소스 해제해줘야 Listening을 중지할 수 있음 ㄷㄷ;
@@ -228,7 +238,7 @@ public class TcpPeer
             }
             catch (SocketException e)
             {
-                Logger.PrintExecption(e);
+                ConsoleEx.PrintExecption(e);
             }
         }
 
@@ -255,6 +265,9 @@ public class TcpPeer
             if (_acceptedClient == null)
                 return false;
 
+            if (!_acceptedClient.IsConnected())
+                return false;
+
             _acceptedClient.SendAsync(pkt);
             return true;
         }
@@ -268,28 +281,31 @@ public class TcpPeer
             {
                 Socket acceptedSocket = _listeningSocket.EndAccept(result);
                 _acceptedClient = new TcpClientEx(acceptedSocket, _pktParser);
+                _acceptedClient.OnDisconnected += (client, safeClosed) => _peer.OnPeerDisconnected?.Invoke(_peer, safeClosed);
+                _acceptedClient.OnReceived += (client, pkt, receivedBytes) => ConsoleEx.LogLine($"{ToString()} {client.RemoteEndPoint}로부터 {pkt}[{receivedBytes}] 수신완료", ConsoleColor.Green);
+                _acceptedClient.OnSent += (client, pkt, sentBytes) => ConsoleEx.LogLine($"{ToString()} {client.RemoteEndPoint}로 {pkt}[{sentBytes}바이트] 전송완료", ConsoleColor.Yellow);
+                _acceptedClient.ReceiveAsync();
                 success = true;
             }
             catch (Exception e)
             {
-                Logger.PrintExecption(e);
+                ConsoleEx.PrintExecption(e, $"{ToString()}");
             }
             finally
             {
                 if (success)
                 {
                     Debug.Assert(_acceptedClient != null);
-                    ConsoleEx.DebugLogLine($"{ToString()} {_acceptedClient.RemoteEndPoint}과 연결 됨", ConsoleColor.Green);
                     _peer.OnHolePunchProcessSuccess(this);
                 }
                 else
                 {
-                    ConsoleEx.DebugLogLine($"{ToString()} 연결 실패", ConsoleColor.Green);
+                    ConsoleEx.DebugLogLine($"[홀펀처: {ToString()}] 클라이언트 {_peer.Id}의 접속 수락 실패");
                 }
             }
         }
 
-        public override string ToString() => "Listening Holepuncher";
+        public override string ToString() => $"{"Listening Connection",20}";
     }
 
     protected class ConnectingHolepuncher : TcpClientEx, IHolepuncher
@@ -309,8 +325,8 @@ public class TcpPeer
 
         private int _retryCount;
 
-        public ConnectingHolepuncher(TcpPeer peer, IPEndPoint localEndPoint, IPEndPoint connectionEndPoint, IPktParser pktParser, Type connectionType) :
-            base(localEndPoint, pktParser)
+        public ConnectingHolepuncher(TcpPeer peer, int localPort, IPEndPoint connectionEndPoint, IPktParser pktParser, Type connectionType) :
+            base(localPort, pktParser)
         {
             _peer = peer;
             _connectionType = connectionType;
@@ -319,13 +335,33 @@ public class TcpPeer
 
             base.OnConnectedSuccess += OnConnectedSuccessCallback;
             base.OnConnectedFailed += OnConnectedFailedCallback;
+            base.OnDisconnected += OnDisconnectedCallback;
+            base.OnReceived += OnReceivedCallback;
+            base.OnSent += OnSentCallback;
+        }
+
+
+
+        private void OnSentCallback(TcpClientEx client, PktBase pkt, int sentBytes)
+        {
+            ConsoleEx.LogLine($"클라이언트 {_peer.Id}({client.RemoteEndPoint})로 {pkt}[{sentBytes}바이트] 전송완료", ConsoleColor.Yellow);
+        }
+
+        private void OnReceivedCallback(TcpClientEx client, PktBase pkt, int receivedBytes)
+        {
+            ConsoleEx.LogLine($"클라이언트 {_peer.Id}({client.RemoteEndPoint})로부터 {pkt}[{receivedBytes}바이트] 수신완료", ConsoleColor.Green);
+        }
+
+        private void OnDisconnectedCallback(TcpClientEx client, bool safeclosed)
+        {
+            _peer.OnPeerDisconnected?.Invoke(_peer, safeclosed);
         }
 
 
         public void StartHandshake()
         {
             Interlocked.Decrement(ref _retryCount);
-            ConsoleEx.DebugLogLine($"{ToString()} {_connectionEndPoint}으로 연결 시작");
+            ConsoleEx.DebugLogLine($"[홀펀처: {ToString()}] 클라이언트 {_peer.Id}({_connectionEndPoint})로 비동기 연결 시작");
             ConnectAsync(_connectionEndPoint);
         }
 
@@ -334,35 +370,39 @@ public class TcpPeer
             if (IsConnected())
                 return;
 
+            ConsoleEx.DebugLogLine($"[홀펀처: {ToString()}] 클라이언트 {_peer.Id}({_connectionEndPoint})로 비동기 연결시도 중단");
+
             Interlocked.Exchange(ref _retryCount, 0);
             Disconnect();
         }
 
         private void OnConnectedSuccessCallback(TcpClientEx client)
         {
-            ConsoleEx.DebugLogLine($"{ToString()} {_connectionEndPoint}과 연결 됨", ConsoleColor.Green);
+            ConsoleEx.DebugLogLine($"[홀펀처: {ToString()}] 클라이언트 {_peer.Id}({_connectionEndPoint})에게 접속하였습니다.");
             _peer.OnHolePunchProcessSuccess(this);
         }
 
         private async void OnConnectedFailedCallback(TcpClientEx client)
         {
             var retryCount = InterlockedInt.Read(ref _retryCount);
-            ConsoleEx.DebugLogLine($"{ToString()} {_connectionEndPoint}과 연결 실패 (남은 재시도 횟수: {retryCount})", ConsoleColor.Green);
+            ConsoleEx.DebugLogLine($"[홀펀처: {ToString()}] 클라이언트 {_peer.Id}({_connectionEndPoint})로 비동기 연결 실패 (남은 재시도 횟수: {retryCount})");
 
             if (retryCount > 0)
+            {
                 await Task.Delay(RetryDelay).ContinueWith(continuationAction =>
                 {
                     if (InterlockedInt.Read(ref _retryCount) > 0)
                         StartHandshake();
                 });
+            }
         }
 
         public override string ToString()
         {
             if (_connectionType == Type.PrivateConnection)
-                return "Private Connecting Holepuncher";
+                return $"{"Private Connection",20}";
 
-            return "Public Connecting Holepuncher";
+            return $"{"Public Connection",20}";
         }
 
         public bool TrySendAsync(PktBase pkt)
@@ -372,8 +412,9 @@ public class TcpPeer
                 SendAsync(pkt);
                 return true;
             }
-            catch
+            catch (Exception e)
             {
+                ConsoleEx.PrintExecption(e, $"{ToString()}", true, ConsoleColor.Red);
                 return false;
             }
         }
