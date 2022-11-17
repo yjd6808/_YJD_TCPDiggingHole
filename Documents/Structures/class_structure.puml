@@ -55,11 +55,6 @@ PeerPktParser -u-|> PktParser
 ParticipantPktParser -u-|> PktParser
 SessionPktParser -u-|> PktParser
 
-PeerPktParser .d.> _TcpPeer
-ParticipantPktParser .d.> _TcpParticipant
-SessionPktParser .d.> _TcpSession
-
-
 TcpIntroducer *-d-> TcpSession
     
 TcpParticipant *-d-> TcpPeer
@@ -70,3 +65,5 @@ ConnectingHolepuncher -u-|> TcpClientEx
 TcpParticipant -u-|> TcpClientEx
 TcpSession -u-|> TcpClientEx
 
+
+TcpClientEx -[hidden]r-> TcpIntroducer
