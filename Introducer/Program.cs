@@ -1,4 +1,6 @@
-﻿using Introducer;
+﻿using CTree;
+
+using Introducer;
 using Shared;
 
 Console.Write("바인드할 포트를 입력해주세요. ");
@@ -15,15 +17,30 @@ introducer.Start();
 
 while (true)
 {
-    ConsoleEx.WriteLine("===========================================");
-    ConsoleEx.WriteLine("[실행 가능한 커맨드 목록]", ConsoleColor.Cyan);
-    ConsoleEx.WriteLine($"├─── 리스닝 포트: {introducer.LocalEndPoint?.Port}", ConsoleColor.White);
-    ConsoleEx.WriteLine($"├─── 접속중인 클라이언트 수: {introducer.GetSessionList().Count}", ConsoleColor.White);
-    ConsoleEx.WriteLine("│ ", ConsoleColor.White);
-    ConsoleEx.WriteLine("├ A: 종료", ConsoleColor.White);
-    ConsoleEx.WriteLine("├ S: 클라이언트 목록 출력", ConsoleColor.White);
-    ConsoleEx.WriteLine("├ D: 브로드캐스트 랜덤메시지 전송", ConsoleColor.White);
-    ConsoleEx.WriteLine("└ F: 특정 클라이언트에게 랜덤메시지 전송", ConsoleColor.White);
+    ConsoleTree commandTree = new("===========================================\n[실행가능한 커맨드 목록]")
+    {
+        ItemForegroundColor = ConsoleColor.White, 
+        BridgeForegroundColor = ConsoleColor.Cyan
+    };
+
+    commandTree.Add(new ConsoleTreeItem($"리스닝 포트: {introducer.LocalEndPoint?.Port}")
+    {
+        BridgeLength = 4,
+        ForegroundColor = ConsoleColor.Green
+    });
+    commandTree.Add(new ConsoleTreeItem($"접속중인 클라이언트 수: {introducer.GetSessionList().Count}")
+    {
+        BridgeLength = 4,
+        ForegroundColor = ConsoleColor.Green
+    });
+    commandTree.AddDummy();
+    commandTree.Add("A: 종료");
+    commandTree.Add("S: 클라이언트 목록 출력");
+    commandTree.Add("D: 브로드캐스트 랜덤메시지 전송");
+    commandTree.Add("F: 특정 클라이언트에게 랜덤메시지 전송");
+    ConsoleEx.Lock();
+    commandTree.Print();
+    ConsoleEx.Unlock();
 
     var key = Console.ReadKey();
 

@@ -13,6 +13,8 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 
+using CTree;
+
 using MoreLinq;
 
 using Shared;
@@ -212,48 +214,51 @@ public class TcpIntroducer
 
     public void PrintSessions()
     {
-        ConsoleEx.WriteLine("[접속중인 유저 목록]");
-        ConsoleEx.WriteLine(" ├ [●]: 연결됨");
-        ConsoleEx.WriteLine(" ├ [  ]: 연결 안됨");
-        ConsoleEx.WriteLine(" │");
+        ConsoleTree commandTree = new("[접속중인 유저 목록]")
+        {
+            BridgeForegroundColor = ConsoleColor.Red,
+            ItemForegroundColor = ConsoleColor.Cyan,
+        };
+
+        commandTree.Add("[●]: 연결됨");
+        commandTree.Add("[  ]: 연결 안됨");
+        commandTree.AddDummy();
+
         using var _ = DisposeLock.AutoLock(this);
         var sessions = _sessions.Values.ToList();
-        for (var i = 0; i < sessions.Count; i++)
+        foreach (TcpSession session in sessions)
         {
-            var session = sessions[i];
-            bool sessionConnected = session.IsConnected();
-
-            string bridge = i == sessions.Count - 1 ? "    " : " │  ";
-            string info = i == sessions.Count - 1 ? $" └ [{session.Id}]" : $" ├ [{session.Id}]";
-            info += sessionConnected ? "[●]" : "[  ]";
-
+            string info = $"[{session.Id}]";
             if (session.IsHolePunching)
                 info += "[홀펀칭 진행중]";
 
-            if (sessionConnected)
-                ConsoleEx.WriteLine(info, ConsoleColor.Green);
-            else
-                ConsoleEx.WriteLine(info, ConsoleColor.Magenta);
+            ConsoleTreeItem userItem = new (info)
+            {
+                ForegroundColor = session.IsConnected() ? 
+                    ConsoleColor.Green : 
+                    ConsoleColor.Red
+            };
 
-            ConsoleEx.WriteLine($"{bridge}├ PrivateEndPoint: {session.PrivateEndPoint}", ConsoleColor.Cyan);
-            ConsoleEx.WriteLine($"{bridge}├ PublicEndPoint: {session.PublicEndPoint}", ConsoleColor.Cyan);
-            ConsoleEx.WriteLine($"{bridge}└ LocalEndPoint: {session.LocalEndPoint}", ConsoleColor.Cyan);
+            userItem.Add($"PrivateEndPoint: {session.PrivateEndPoint}");
+            userItem.Add($"PublicEndPoint: {session.PublicEndPoint}");
+            var child = userItem.AddReturnChild($"LocalEndPoint: {session.LocalEndPoint}");
 
             List<long> connectedSessions = session.ConnectedSessions;
             int connectedSessionCount = connectedSessions.Count;
 
             if (connectedSessionCount > 0)
             {
-                ConsoleEx.WriteLine($"{bridge}    ├ [P2P 연결된 대상]", ConsoleColor.DarkYellow);
+                child.Add(new ConsoleTreeItem("[P2P 연결된 대상]") { ForegroundColor = ConsoleColor.DarkYellow });
                 for (int j = 0; j < connectedSessionCount; j++)
-                {
-                    if (j == connectedSessionCount - 1)
-                        ConsoleEx.WriteLine($"{bridge}    └ [{connectedSessions[j]}]", ConsoleColor.DarkYellow);
-                    else
-                        ConsoleEx.WriteLine($"{bridge}    ├ [{connectedSessions[j]}]", ConsoleColor.DarkYellow);
-                }
+                    child.Add(new ConsoleTreeItem($"{connectedSessions[j]}") { ForegroundColor = ConsoleColor.DarkYellow });
             }
+
+            commandTree.Add(userItem);
         }
+
+        ConsoleEx.Lock();
+        commandTree.Print();
+        ConsoleEx.Unlock();
     }
 
     public void BroadcastRandomMessage(string message) => Broadcast(new PktServerMessage { Message = message });

@@ -18,6 +18,7 @@ public class ConsoleEx
         using var _ = DisposeLock.AutoLock(Config.PrintLock);
         Console.WriteLine();
     }
+
     public static void WriteLine(string msg, ConsoleColor color = ConsoleColor.Gray, string msg2 = "", ConsoleColor color2 = ConsoleColor.Gray)
     {
         using var _ = DisposeLock.AutoLock(Config.PrintLock);
@@ -84,6 +85,16 @@ public class ConsoleEx
         Console.ForegroundColor = color;
         Console.Write(msg);
         Console.ForegroundColor = defaultColor;
+    }
+
+    public static void Lock()
+    {
+        Monitor.Enter(Config.PrintLock);
+    }
+
+    public static void Unlock()
+    {
+        Monitor.Exit(Config.PrintLock);
     }
 
     public static void PrintExecption(Exception e, string msg = "", bool printStackTrace = true, ConsoleColor color = ConsoleColor.Gray)

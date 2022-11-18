@@ -1,6 +1,8 @@
 ﻿using System.Diagnostics;
 using System.Net.Sockets;
 
+using CTree;
+
 using Participant;
 using Shared;
 
@@ -23,34 +25,43 @@ while (true)
     string myIdStr = participant.Id != -1 ? $"{participant.Id}" : "갱신 중";
     bool serverConnected = participant.IsConnected();
     string serverConnectedStr = serverConnected ? "중개 서버와 연결됨" : "중개 서버와 연결되지 않음";
-    ConsoleEx.WriteLine("===========================================");
-    ConsoleEx.WriteLine($"[실행 가능한 커맨드 목록]", ConsoleColor.Cyan);
-    
-
-    if (myId == -1)
-        ConsoleEx.WriteLine($"├─── 당신의 ID: {myIdStr}", ConsoleColor.DarkYellow);
-    else
-        ConsoleEx.WriteLine($"├─── 당신의 ID: {myIdStr}", ConsoleColor.Green);
-
-    if (serverConnected)
-        ConsoleEx.WriteLine($"├─── {serverConnectedStr}", ConsoleColor.Green);
-    else
-        ConsoleEx.WriteLine($"├─── {serverConnectedStr}", ConsoleColor.Red);
-
-    if (participant.PublicEndPoint != null) 
+    ConsoleTree commandTree = new("===========================================\n[실행가능한 커맨드 목록]")
     {
-        ConsoleEx.WriteLine($"├─── 당신의 사설 IP: {participant.LocalEndPoint}", ConsoleColor.White);
-        ConsoleEx.WriteLine($"├─── 당신의 공인 IP: {participant.PublicEndPoint}", ConsoleColor.White);
+        ItemForegroundColor = ConsoleColor.White,
+        BridgeForegroundColor = ConsoleColor.Cyan
+    };
+
+    commandTree.Add(new ConsoleTreeItem($"당신의 ID: {myIdStr}")
+    {
+        ForegroundColor = myId == -1 ? 
+            ConsoleColor.DarkYellow : 
+            ConsoleColor.Green
+    });
+
+    commandTree.Add(new ConsoleTreeItem($"{serverConnectedStr}")
+    {
+        ForegroundColor = serverConnected ? 
+            ConsoleColor.Green : 
+            ConsoleColor.Red
+    });
+
+    if (participant.PublicEndPoint != null)
+    {
+        commandTree.Add(new ConsoleTreeItem($"당신의 사설 IP: {participant.LocalEndPoint}") { BridgeLength = 2} );
+        commandTree.Add(new ConsoleTreeItem($"당신의 공인 IP: {participant.PublicEndPoint}") { BridgeLength = 2 });
     }
 
-    ConsoleEx.WriteLine("│ ", ConsoleColor.White);
-    ConsoleEx.WriteLine("├ A: 서버와 연결 종료", ConsoleColor.White);
-    ConsoleEx.WriteLine("├ S: 피어 목록 출력", ConsoleColor.White);
-    ConsoleEx.WriteLine("├ D: 특정 피어와 홀펀칭 수행", ConsoleColor.White);
-    ConsoleEx.WriteLine("├ F: 특정 피어에게 랜덤 메시지 전송", ConsoleColor.White);
-    ConsoleEx.WriteLine("├ G: 특정 피어와 연결 종료", ConsoleColor.White);
-    ConsoleEx.WriteLine("├ H: 서버에게 에코 랜덤 메시지 전송", ConsoleColor.White);
-    ConsoleEx.WriteLine("└ J: 프로그램 종료", ConsoleColor.White);
+    commandTree.AddDummy();
+    commandTree.Add("A: 서버와 연결 종료");
+    commandTree.Add("S: 피어 목록 출력");
+    commandTree.Add("D: 특정 피어와 홀펀칭 수행");
+    commandTree.Add("F: 특정 피어에게 랜덤 메시지 전송");
+    commandTree.Add("G: 특정 피어와 연결 종료");
+    commandTree.Add("H: 서버에게 에코 랜덤 메시지 전송");
+    commandTree.Add("J: 프로그램 종료");
+    ConsoleEx.Lock();
+    commandTree.Print();
+    ConsoleEx.Unlock();
     var key = Console.ReadKey();
     
     switch (key.Key)

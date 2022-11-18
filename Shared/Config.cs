@@ -21,10 +21,10 @@ public class Config
     public const bool PrintNormalLog = true;        // 일반 로그 출력할지 (패킷 송/수신/접속 등)
 
     // 정도의 로컬 테스트용 주소
-    // public static readonly IPEndPoint IntroducerEndPoint = IPEndPoint.Parse("112.163.241.175:9999");
+    public static readonly IPEndPoint IntroducerEndPoint = IPEndPoint.Parse("112.163.241.175:9999");
 
     // 정도의 가상머신 주소
-    public static readonly IPEndPoint IntroducerEndPoint = IPEndPoint.Parse("34.126.115.248:9999");
+    // public static readonly IPEndPoint IntroducerEndPoint = IPEndPoint.Parse("34.126.115.248:9999");
 }
 
 

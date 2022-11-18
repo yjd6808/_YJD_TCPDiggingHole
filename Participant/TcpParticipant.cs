@@ -8,6 +8,8 @@
 
 using System.Net;
 
+using CTree;
+
 using Shared;
 
 namespace Participant;
@@ -116,17 +118,22 @@ public class TcpParticipant : TcpClientEx
 
         if (OtherParticipants.Count == 0)
         {
-            ConsoleEx.WriteLine("접속중인 유저가 없습니다.", ConsoleColor.Red);
+            ConsoleEx.WriteLine("접속중인 유저가 없습니다.", ConsoleColor.DarkYellow);
             return;
         }
 
-        ConsoleEx.WriteLine("[접속중인 유저 목록]");
-        ConsoleEx.WriteLine(" ├ [●]: P2P 연결됨");
-        ConsoleEx.WriteLine(" ├ [  ]: P2P 연결 안됨");
-        ConsoleEx.WriteLine(" │");
+        ConsoleTree commandTree = new("[접속중인 유저 목록]")
+        {
+            BridgeForegroundColor = ConsoleColor.Red,
+            ItemForegroundColor = ConsoleColor.DarkGray,
+        };
+
+        commandTree.Root.SetForegroundColor(ConsoleColor.Cyan);
+        commandTree.Add("[●]: P2P 연결됨");
+        commandTree.Add("[  ]: P2P 연결 안됨");
+        commandTree.AddDummy();
 
         List<TcpPeer> list = OtherParticipants.Values.ToList();
-        bool prevP2PConn = false;
 
         for (int i = 0; i < list.Count; i++)
         {
@@ -134,29 +141,26 @@ public class TcpParticipant : TcpClientEx
             bool connected = peer.IsConnected();
             string connectedStr = connected ? "●" : "  ";
 
-            if (i == list.Count - 1)
-                ConsoleEx.WriteLine($" └ [{peer.Id}][{connectedStr}] {peer.PrivateEndPoint} {peer.PublicEndPoint}",
-                    connected ? ConsoleColor.Green : ConsoleColor.DarkGray);
-            else
-                ConsoleEx.WriteLine($" ├ [{peer.Id}][{connectedStr}] {peer.PrivateEndPoint} {peer.PublicEndPoint}",
-                    connected ? ConsoleColor.Green : ConsoleColor.DarkGray);
+            var commadTreeItem = new ConsoleTreeItem($"[{peer.Id}][{connectedStr}] {peer.PrivateEndPoint} {peer.PublicEndPoint}")
+            {
+                ForegroundColor = connected ?
+                    ConsoleColor.Green :
+                    ConsoleColor.DarkGray
+            };
 
             if (connected)
             {
-                string bridgeStr = prevP2PConn ? "    " : " │  ";
-
-                if (i == list.Count - 1)
-                    bridgeStr = "    ";
-
-                ConsoleEx.WriteLine($"{bridgeStr}├ 연결타입: {peer.ConnectionTypeToString()}", ConsoleColor.DarkYellow);
-                ConsoleEx.WriteLine($"{bridgeStr}├ LocalEndPoint: {peer.LocalEndPoint}", ConsoleColor.Cyan);
-                ConsoleEx.WriteLine($"{bridgeStr}└ RemoteEndPoint: {peer.RemoteEndPoint}", ConsoleColor.Cyan);
-                prevP2PConn = true;
-                continue;
+                commadTreeItem.Add(new ConsoleTreeItem($"연결타입: {peer.ConnectionTypeToString()}") { ForegroundColor = ConsoleColor.DarkYellow });
+                commadTreeItem.Add(new ConsoleTreeItem($"LocalEndPoint: {peer.LocalEndPoint}") { ForegroundColor = ConsoleColor.Cyan });
+                commadTreeItem.Add(new ConsoleTreeItem($"RemoteEndPoint: {peer.RemoteEndPoint}") { ForegroundColor = ConsoleColor.Cyan });
             }
-
-            prevP2PConn = false;
+            
+            commandTree.Add(commadTreeItem);
         }
+
+        ConsoleEx.Lock();
+        commandTree.Print();
+        ConsoleEx.Unlock();
     }
 
     
